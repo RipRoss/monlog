@@ -1,5 +1,5 @@
 import logging
-from log4mongo.handlers import BufferedMongoHandler, MongoFormatter
+from log4mongo.handlers import BufferedMongoHandler
 import threading
 from typing import Callable
 import queue
@@ -30,7 +30,6 @@ class CustomFormatter(logging.Formatter):
     def format(self, record):
         """Formats LogRecord into python dictionary."""
         # Standard document
-        # print(f"format {self.lineno}")
         document = {
             'timestamp': datetime.datetime.utcnow(),
             'level': record.levelname,
@@ -47,10 +46,10 @@ class CustomFormatter(logging.Formatter):
             document.update({
                 'exception': {
                     'message': str(record.exc_info[1]),
-                    'code': 0,
                     'stackTrace': self.formatException(record.exc_info)
                 }
             })
+
         # Standard document decorated with extra contextual information
         if len(self.DEFAULT_PROPERTIES) != len(record.__dict__):
             contextual_extra = set(record.__dict__).difference(
@@ -160,6 +159,5 @@ class Logger(logging.Logger):
         self.log_queue.flush()
 
     def _set_record_data(self):
-        caller = inspect.stack()[2]    
-        print(f"record_data {caller.lineno}")    
+        caller = inspect.stack()[2]
         self.formatter.set_record_data(caller.filename, caller.filename.split("/")[-1], caller.function, caller.lineno)
