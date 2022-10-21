@@ -126,6 +126,14 @@ class Logger(logging.Logger):
             formatter=self.formatter
         )
 
+    def write_debug(self, msg: str, extra: dict = None):
+        self._set_record_data()
+        self.log_queue.push(
+            self.debug,
+            msg,
+            extra=extra
+        )
+
     def write_info(self, msg: str, extra: dict = None):
         self._set_record_data()
         self.log_queue.push(
@@ -135,6 +143,7 @@ class Logger(logging.Logger):
         )
 
     def write_warn(self, msg: str, extra: dict = None):
+        self._set_record_data()
         self.log_queue.push(
             self.warn,
             msg,
@@ -142,6 +151,7 @@ class Logger(logging.Logger):
         )
 
     def write_error(self, msg: str, extra: dict = None):
+        self._set_record_data()
         self.log_queue.push(
             self.error,
             msg,
@@ -149,6 +159,7 @@ class Logger(logging.Logger):
         )
 
     def write_critical(self, msg: str, extra: dict = None):
+        self._set_record_data()
         self.log_queue.push(
             self.critical,
             msg,
