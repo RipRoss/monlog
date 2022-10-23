@@ -74,12 +74,13 @@ class _Queue(queue.Queue):
             self.put_nowait("FLUSH")
             self._te.wait()
 
-    def push(self, func: Callable[[str, dict], None], message: str, extra: dict = None):
+    def push(self, func: Callable[[str, dict], None], message: str, extra: dict = None, exc_info: int = 0):
         try:
             self.put_nowait({
                 "callable": func,
                 "message": message,
-                "extra": extra
+                "extra": extra,
+                "exc_info": exc_info
             })
         except queue.Full:
             #  throw away the log
@@ -137,15 +138,18 @@ class Logger(logging.Logger):
         self.log_queue.push(
             self.warn,
             msg,
-            extra=extra
+            extra=extra,
+            exc_info=1
         )
 
     def write_error(self, msg: str, extra: dict = None):
+        # TODO : For warn, error and critical methods - we need to ensure stacktrace information is logged
         self._set_record_data()
         self.log_queue.push(
             self.error,
             msg,
-            extra=extra
+            extra=extra,
+            exc_info=1
         )
 
     def write_critical(self, msg: str, extra: dict = None):
@@ -153,7 +157,8 @@ class Logger(logging.Logger):
         self.log_queue.push(
             self.critical,
             msg,
-            extra=extra
+            extra=extra,
+            exc_info=1
         )
         
     def flush(self):
