@@ -3,16 +3,19 @@ from log4mongo.handlers import BufferedMongoHandler
 import threading
 from typing import Callable
 import queue
+import socket
+from pymongo import errors
 
 import datetime
 
 import inspect
 
 
-class CustomFormatter(logging.Formatter):
+class MongoError(Exception):
+    pass
 
-    DEFAULT_PROPERTIES = logging.LogRecord(
-        '', '', '', '', '', '', '', '').__dict__.keys()
+
+class _CustomFormatter(logging.Formatter):
 
     def __init__(self) -> None:
         super().__init__()
@@ -50,30 +53,26 @@ class CustomFormatter(logging.Formatter):
                 }
             })
 
-        # Standard document decorated with extra contextual information
-        if len(self.DEFAULT_PROPERTIES) != len(record.__dict__):
-            contextual_extra = set(record.__dict__).difference(
-                set(self.DEFAULT_PROPERTIES))
-            if contextual_extra:
-                for key in contextual_extra:
-                    document[key] = record.__dict__[key]
         return document
 
 
 class _Queue(queue.Queue):
     def __init__(self, maxsize: int = 100) -> None:
         super().__init__(maxsize=maxsize)
-        self.t: threading.Thread = None
-        self.te: threading.Event = threading.Event()
+        self._started = False
+        self._t: threading.Thread = None
+        self._te: threading.Event = threading.Event()
 
     def start(self):
-        self.t = threading.Thread(target=self.poll, daemon=True)  # daemon to ensure that the thread exits when the script does
-        self.t.start()
+        self._t = threading.Thread(target=self._poll, daemon=True)  # daemon to ensure that the thread exits when the script does
+        self._t.start()
+        self._started = True
 
     def flush(self):
         # due to the concurrent nature of this package, we must ensure that our logs have completed befoere exiting the applicataion
-        self.put_nowait("FLUSH")
-        self.te.wait()
+        if self._started:
+            self.put_nowait("FLUSH")
+            self._te.wait()
 
     def push(self, func: Callable[[str, dict], None], message: str, extra: dict = None):
         try:
@@ -86,14 +85,14 @@ class _Queue(queue.Queue):
             #  throw away the log
             pass
 
-    def poll(self):
-        while True:
+    def _poll(self):
+        while self._started:
             q_val: str = self.get(block=True)  # block on this line to prevent it continuously looping over as quick as it can
 
             if q_val == "FLUSH":
                 # You should never log after running the flush method, as this will wait for all logs to be logged before your script exiting
-                self.te.set()  # set will set the event to true, triggering line #30 to continue
-                break
+                self._te.set()  # set will set the event to true, triggering line #30 to continue
+                self._started = False  # set the while condition to False, immediately causing a break
 
             q_val["callable"](q_val["message"], extra=q_val["extra"])
 
@@ -107,24 +106,14 @@ class Logger(logging.Logger):
         self.buffer_size: str = buffer_size
         self.database: str = database
         self.collection: str = collection#
-        self.formatter = CustomFormatter()
+        self.formatter = _CustomFormatter()
 
         self.log_queue: _Queue = _Queue()
-        self.handler: BufferedMongoHandler = self._create_handler()
-
-        self.addHandler(self.handler)
-        self.log_queue.start()
-
-    def _create_handler(self) -> BufferedMongoHandler:
-        return BufferedMongoHandler(
-            host=self.host,
-            username=None if not self.username else self.username,
-            password=None if not self.password else self.password,
-            database_name=self.database,
-            collection=self.collection,
-            buffer_size=self.buffer_size,
-            formatter=self.formatter
-        )
+        
+        if self._ping_mongo():
+            self.handler: BufferedMongoHandler = self._create_handler() if self._ping_mongo() else None
+            self.addHandler(self.handler)
+            self.log_queue.start()
 
     def write_debug(self, msg: str, extra: dict = None):
         self._set_record_data()
@@ -172,3 +161,32 @@ class Logger(logging.Logger):
     def _set_record_data(self):
         caller = inspect.stack()[2]
         self.formatter.set_record_data(caller.filename, caller.filename.split("/")[-1], caller.function, caller.lineno)
+
+    def _create_handler(self) -> BufferedMongoHandler:
+        try:
+            return BufferedMongoHandler(
+                host=self.host,
+                username=None if not self.username else self.username,
+                password=None if not self.password else self.password,
+                database_name=self.database,
+                collection=self.collection,
+                buffer_size=self.buffer_size,
+                formatter=self.formatter
+            )
+        except errors.PyMongoError as err:
+            raise MongoError(err) from err
+
+    @staticmethod
+    def _ping_mongo() -> bool:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            result = sock.connect_ex(('127.0.0.1', 27017))
+
+            if result != 0:
+                # no connection
+                print("no connection to mongo")           
+                return False
+
+            return True 
+        finally:
+            sock.close()
