@@ -65,8 +65,8 @@ class _Queue(queue.Queue):
 
     def start(self):
         self._t = threading.Thread(target=self._poll, daemon=True)  # daemon to ensure that the thread exits when the script does
-        self._t.start()
         self._started = True
+        self._t.start()
 
     def flush(self):
         # due to the concurrent nature of this package, we must ensure that our logs have completed befoere exiting the applicataion
@@ -92,7 +92,8 @@ class _Queue(queue.Queue):
             if q_val == "FLUSH":
                 # You should never log after running the flush method, as this will wait for all logs to be logged before your script exiting
                 self._te.set()  # set will set the event to true, triggering line #30 to continue
-                self._started = False  # set the while condition to False, immediately causing a break
+                self._started = False  
+                break  # it will finish the iteration, even tho we fail the condition above
 
             q_val["callable"](q_val["message"], extra=q_val["extra"])
 
@@ -176,11 +177,9 @@ class Logger(logging.Logger):
         except errors.PyMongoError as err:
             raise MongoError(err) from err
 
-    @staticmethod
-    def _ping_mongo() -> bool:
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            result = sock.connect_ex(('127.0.0.1', 27017))
+    def _ping_mongo(self) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            result = sock.connect_ex((self.host, 27017))
 
             if result != 0:
                 # no connection
@@ -188,5 +187,3 @@ class Logger(logging.Logger):
                 return False
 
             return True 
-        finally:
-            sock.close()
